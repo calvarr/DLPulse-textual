@@ -1,0 +1,7 @@
+textual>=0.80.0
+rich>=13.0.0
+yt-dlp>=2024.1.0
+Flask>=3.0.0
+pychromecast>=14.0.0
+zeroconf>=0.132.0
+packaging>=23.0

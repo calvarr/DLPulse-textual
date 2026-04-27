@@ -1,0 +1,18 @@
+[project]
+name = "dlpulse-textual"
+version = "1.0.0"
+description = "DLPulse Textual TUI — entry: dlpulse_textual.py (uses ../yt/flet_app yt_core & helpers)"
+requires-python = ">=3.11"
+dependencies = [
+    "textual>=0.80.0",
+    "rich>=13.0.0",
+    "yt-dlp>=2024.1.0",
+    "Flask>=3.0.0",
+    "pychromecast>=14.0.0",
+    "zeroconf>=0.132.0",
+    "packaging>=23.0",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
