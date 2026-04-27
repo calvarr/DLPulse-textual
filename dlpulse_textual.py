@@ -68,7 +68,6 @@ except ImportError:
 
 # ── Config persistence ────────────────────────────────────────────────────────
 _CONFIG_PATH = Path.home() / ".config" / "dlpulse" / "config.json"
-_DEFAULT_PLAYER = "mpv"  # fallback
 
 # Library: only these extensions (lowercase suffix incl. dot)
 def _artwork_preset_index() -> int:
@@ -146,8 +145,116 @@ def _get_downloads_dir(cfg: dict) -> Path:
 
 
 def _get_player(cfg: dict) -> str:
-    return cfg.get("player") or _DEFAULT_PLAYER
+    """Stored value for the player field; empty = use OS default for URLs/files."""
+    raw = cfg.get("player")
+    if raw is None:
+        return ""
+    return str(raw).strip()
 
+
+def _find_ffmpeg_binary() -> str | None:
+    """Return path to ffmpeg if found on PATH or common Windows install dirs."""
+    for name in ("ffmpeg", "ffmpeg.exe"):
+        w = shutil.which(name)
+        if w:
+            return w
+    if sys.platform == "win32":
+        for base in (
+            os.environ.get("ProgramFiles", r"C:\Program Files"),
+            os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+        ):
+            for parts in (
+                ("ffmpeg", "bin", "ffmpeg.exe"),
+                ("FFmpeg", "bin", "ffmpeg.exe"),
+            ):
+                cand = Path(base).joinpath(*parts)
+                if cand.is_file():
+                    return str(cand)
+    return None
+
+
+def _resolve_ffmpeg_for_ytdlp(cfg: dict) -> str | None:
+    """Path for yt-dlp ``ffmpeg_location`` (exe or directory containing ffmpeg)."""
+    raw = (cfg.get("ffmpeg_location") or "").strip()
+    if raw:
+        p = Path(raw)
+        if p.is_file():
+            low = p.name.lower()
+            if low in ("ffmpeg", "ffmpeg.exe"):
+                return str(p.resolve())
+            return None
+        if p.is_dir():
+            exe = p / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+            if exe.is_file():
+                return str(p.resolve())
+        return None
+    found = _find_ffmpeg_binary()
+    return str(Path(found).resolve()) if found else None
+
+
+def _ffmpeg_status_not_found_markup() -> str:
+    if sys.platform == "win32":
+        tip = "Windows: [bold]winget install Gyan.FFmpeg[/] then restart, or set path below."
+    elif sys.platform == "darwin":
+        tip = "macOS: [bold]brew install ffmpeg[/], or set path below."
+    else:
+        tip = "Linux/BSD: install [bold]ffmpeg[/] from your package manager, or set path below."
+    return (
+        "FFmpeg: [bold #f85149]not found[/] — needed for video+audio merge and MP3/M4A. "
+        f"[#484f58]{tip}[/]"
+    )
+
+
+def _ffmpeg_status_markup(cfg: dict) -> str:
+    override = (cfg.get("ffmpeg_location") or "").strip()
+    resolved = _resolve_ffmpeg_for_ytdlp(cfg)
+    if resolved:
+        src = "custom" if override else "PATH"
+        return f"FFmpeg: [bold #3fb950]OK[/] ({src}) [dim]{escape(resolved)}[/]"
+    return _ffmpeg_status_not_found_markup()
+
+
+def _ffmpeg_settings_hint_markup() -> str:
+    if sys.platform == "win32":
+        return (
+            "[#484f58]Leave empty for PATH. Otherwise: folder with [bold]ffmpeg.exe[/] "
+            "or full path to that file.[/]"
+        )
+    if sys.platform == "darwin":
+        return (
+            "[#484f58]Leave empty for PATH. Otherwise: directory with the [bold]ffmpeg[/] binary "
+            "(e.g. [bold]/opt/homebrew/bin[/]) or full path to [bold]ffmpeg[/].[/]"
+        )
+    return (
+        "[#484f58]Leave empty for PATH. Otherwise: directory with [bold]ffmpeg[/] "
+        "(e.g. [bold]/usr/bin[/]) or full path to the binary.[/]"
+    )
+
+
+def _ffmpeg_input_placeholder() -> str:
+    if sys.platform == "win32":
+        return r"C:\ffmpeg\bin · full path to ffmpeg.exe …"
+    if sys.platform == "darwin":
+        return "/opt/homebrew/bin · /usr/local/bin/ffmpeg …"
+    return "/usr/bin · ~/.local/bin · full path to ffmpeg …"
+
+
+def _ffmpeg_missing_download_tip_log() -> str:
+    if sys.platform == "win32":
+        return (
+            "[yellow]Tip:[/] winget install Gyan.FFmpeg (restart app) or set FFmpeg path in Settings."
+        )
+    if sys.platform == "darwin":
+        return "[yellow]Tip:[/] brew install ffmpeg, or set FFmpeg path in Settings."
+    return "[yellow]Tip:[/] Install ffmpeg from your distro, or set path in Settings (F6)."
+
+
+def _ffmpeg_missing_err_suffix() -> str:
+    if sys.platform == "win32":
+        return " — Settings → FFmpeg, or: winget install Gyan.FFmpeg"
+    if sys.platform == "darwin":
+        return " — Settings → FFmpeg, or: brew install ffmpeg"
+    return " — Settings → FFmpeg, or install ffmpeg via your package manager"
 
 
 class RenameScreen(Screen[tuple[str, str, str] | None]):
@@ -608,24 +715,74 @@ class DLPulseTextualApp(App[None]):
     #cast-name-filter { width: 1fr; }
 
     /* ── Settings ────────────────────────────────────────────────────────── */
+    .settings-tab-root {
+        height: 1fr;
+        min-height: 0;
+        layout: vertical;
+        padding: 0 2 1 2;
+    }
+
+    .settings-toolbar {
+        layout: horizontal;
+        height: auto;
+        margin-bottom: 1;
+        content-align: left middle;
+    }
+
+    .settings-toolbar Static {
+        color: #484f58;
+        height: 1;
+        content-align: left middle;
+        margin-right: 2;
+    }
+
+    #settings-scroll {
+        height: 1fr;
+        min-height: 0;
+    }
+
+    #settings-inner-scroll {
+        height: auto;
+        layout: vertical;
+    }
+
     #settings-dl-path  { color: #58a6ff; padding: 0 1; height: 1; }
-    #settings-player   { color: #3fb950; padding: 0 1; height: 1; }
-    #settings-ytdlp    { color: #3fb950; padding: 0 1; height: 1; }
+    #settings-player   { color: #3fb950; padding: 0 1; height: auto; min-height: 1; }
+    #settings-ytdlp    { color: #58a6ff; padding: 0 1; height: 1; }
+
+    #settings-ffmpeg-status {
+        height: auto;
+        min-height: 1;
+        color: #e6edf3;
+        padding: 0 1;
+    }
+
+    #settings-player-hint {
+        height: auto;
+        min-height: 1;
+        color: #484f58;
+        padding: 0 1;
+    }
 
     #settings-cast-wait-help {
         height: auto;
+        min-height: 1;
         color: #484f58;
-        padding: 0 1 1 1;
+        padding: 0 1;
     }
 
     #settings-cast-wait { width: 10; }
 
+    #settings-ffmpeg-input { min-width: 16; width: 1fr; }
+
     #log-settings {
-        height: 1fr;
-        min-height: 4;
+        height: 7;
+        min-height: 5;
+        max-height: 12;
         border: solid #21262d;
         background: #161b22;
         padding: 0 1;
+        margin-top: 1;
     }
 
     /* ── Inputs ───────────────────────────────────────────────────────────── */
@@ -992,47 +1149,76 @@ class DLPulseTextualApp(App[None]):
                 )
             with TabPane("⚙ Settings  F6", id="tab-settings"):
                 yield Vertical(
-                    Vertical(
-                        Label("  📁  DOWNLOADS FOLDER", classes="section-label"),
-                        Static("", id="settings-dl-path"),
-                        Horizontal(
-                            Button("Browse  ^S", id="btn-settings-browse-dl", variant="primary"),
-                            Button("Reset ~/Downloads", id="btn-settings-reset-dl"),
-                            classes="row-gap",
-                        ),
-                        classes="settings-card",
+                    Horizontal(
+                        Static("Save player, FFmpeg path, and Cast wait at once:", id="settings-toolbar-hint"),
+                        Button("Save all settings", id="btn-settings-save-all", variant="primary"),
+                        classes="settings-toolbar",
                     ),
-                    Vertical(
-                        Label("  ▶  MEDIA PLAYER", classes="section-label"),
-                        Static("", id="settings-player"),
-                        Horizontal(
-                            Input(placeholder="mpv, vlc, /usr/bin/mpv …", id="settings-player-input"),
-                            Button("Save", id="btn-settings-save-player", variant="success"),
-                            classes="row-gap",
+                    ScrollableContainer(
+                        Vertical(
+                            Vertical(
+                                Label("  📁  DOWNLOADS", classes="section-label"),
+                                Static("", id="settings-dl-path"),
+                                Horizontal(
+                                    Button("Browse  ^S", id="btn-settings-browse-dl", variant="primary"),
+                                    Button("Reset ~/Downloads", id="btn-settings-reset-dl"),
+                                    classes="row-gap",
+                                ),
+                                classes="settings-card",
+                            ),
+                            Vertical(
+                                Label("  ⬡  YT-DLP & FFMPEG", classes="section-label"),
+                                Static("", id="settings-ytdlp"),
+                                Static("", id="settings-ffmpeg-status"),
+                                Static(_ffmpeg_settings_hint_markup(), id="settings-ffmpeg-hint"),
+                                Horizontal(
+                                    Input(
+                                        placeholder=_ffmpeg_input_placeholder(),
+                                        id="settings-ffmpeg-input",
+                                    ),
+                                    Button("Save", id="btn-settings-save-ffmpeg", variant="success"),
+                                    Button("Clear", id="btn-settings-clear-ffmpeg"),
+                                    classes="row-gap",
+                                ),
+                                Button("Check PyPI version", id="btn-settings-pypi"),
+                                classes="settings-card",
+                            ),
+                            Vertical(
+                                Label("  ▶  MEDIA PLAYER", classes="section-label"),
+                                Static("", id="settings-player"),
+                                Static(
+                                    "[#484f58]Empty = OS default · vlc / mpv / full path — Save or Enter[/]",
+                                    id="settings-player-hint",
+                                ),
+                                Horizontal(
+                                    Input(
+                                        placeholder="empty · vlc · mpv · full path…",
+                                        id="settings-player-input",
+                                    ),
+                                    Button("Save", id="btn-settings-save-player", variant="success"),
+                                    classes="row-gap",
+                                ),
+                                classes="settings-card",
+                            ),
+                            Vertical(
+                                Label("  ⊹  CHROMECAST", classes="section-label"),
+                                Static(
+                                    "[#484f58]Seconds to listen for devices (mDNS). ↑ scroll if needed[/]",
+                                    id="settings-cast-wait-help",
+                                ),
+                                Horizontal(
+                                    Input(placeholder="3", id="settings-cast-wait"),
+                                    Button("Save", id="btn-settings-save-cast-wait", variant="success"),
+                                    classes="row-gap",
+                                ),
+                                classes="settings-card",
+                            ),
+                            RichLog(id="log-settings", markup=True),
+                            id="settings-inner-scroll",
                         ),
-                        classes="settings-card",
+                        id="settings-scroll",
                     ),
-                    Vertical(
-                        Label("  ⊹  CHROMECAST DISCOVERY", classes="section-label"),
-                        Static(
-                            "[#484f58]Seconds to listen for Cast devices on LAN (mDNS). Increase on slow Wi‑Fi.[/]",
-                            id="settings-cast-wait-help",
-                        ),
-                        Horizontal(
-                            Input(placeholder="3", id="settings-cast-wait"),
-                            Button("Save", id="btn-settings-save-cast-wait", variant="success"),
-                            classes="row-gap",
-                        ),
-                        classes="settings-card",
-                    ),
-                    Vertical(
-                        Label("  ⬡  YT-DLP", classes="section-label"),
-                        Static("", id="settings-ytdlp"),
-                        Button("Check PyPI version", id="btn-settings-pypi"),
-                        classes="settings-card",
-                    ),
-                    RichLog(id="log-settings", markup=True),
-                    classes="tab-pane-body",
+                    classes="settings-tab-root",
                 )
         yield Footer()
 
@@ -1056,14 +1242,33 @@ class DLPulseTextualApp(App[None]):
             el.add_class("hidden")
 
     def _resolve_player_executable(self) -> str | None:
-        """Player from Settings, or first found on PATH (mpv, vlc, …)."""
+        """Absolute path to the configured player, or None = use OS default for URLs/files."""
         p = (self._player or "").strip()
-        if p:
-            return p
-        for name in ("mpv", "vlc", "celluloid", "totem", "ffplay", "iina"):
-            w = shutil.which(name)
+        if not p or p.lower() in ("auto", "default", "os", "system"):
+            return None
+        path = Path(p)
+        if path.is_file():
+            return str(path.resolve())
+        if sys.platform == "win32" and path.suffix.lower() != ".exe":
+            pexe = path.with_suffix(".exe")
+            if pexe.is_file():
+                return str(pexe.resolve())
+        w = shutil.which(p)
+        if w:
+            return w
+        if sys.platform == "win32":
+            w = shutil.which(f"{p}.exe")
             if w:
                 return w
+            low = Path(p).name.lower().replace(".exe", "")
+            if low == "vlc":
+                for base in (
+                    os.environ.get("ProgramFiles", r"C:\Program Files"),
+                    os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                ):
+                    cand = Path(base) / "VideoLAN" / "VLC" / "vlc.exe"
+                    if cand.is_file():
+                        return str(cand)
         return None
 
     def _build_player_argv(self, player: str, targets: Sequence[str | Path]) -> list[str]:
@@ -1095,6 +1300,64 @@ class DLPulseTextualApp(App[None]):
             if cr and gui not in ("mpv.exe", "mpv.com", "vlc.exe", "vlc"):
                 kwargs["creationflags"] = cr
         subprocess.Popen(argv, **kwargs)
+
+    def _launch_urls_os_default(self, urls: Sequence[str]) -> None:
+        """Open URLs with the OS-registered handler (browser, VLC URL scheme, …)."""
+        for u in urls:
+            s = (u or "").strip()
+            if not s:
+                continue
+            if sys.platform == "win32":
+                cr = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                subprocess.Popen(
+                    ["cmd", "/c", "start", "", s],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=cr,
+                )
+            elif sys.platform == "darwin":
+                subprocess.Popen(
+                    ["open", s],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            else:
+                subprocess.Popen(
+                    ["xdg-open", s],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+
+    def _launch_paths_os_default(self, paths: Sequence[Path | str]) -> None:
+        """Open local files with the OS default application."""
+        for raw in paths:
+            p = Path(str(raw))
+            if not p.is_file():
+                continue
+            ab = str(p.resolve())
+            if sys.platform == "win32":
+                os.startfile(ab)  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(
+                    ["open", ab],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            else:
+                subprocess.Popen(
+                    ["xdg-open", ab],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
 
     def on_mount(self) -> None:
         rt = self.query_one("#results-table", DataTable)
@@ -1257,19 +1520,35 @@ class DLPulseTextualApp(App[None]):
         self.query_one("#settings-dl-path", Static).update(
             f"[bold #58a6ff]{self._downloads_dir}[/]"
         )
-        self.query_one("#settings-player", Static).update(
-            f"Player: [bold #3fb950]{self._player}[/]"
-        )
+        if get_installed_ytdlp_version:
+            self.query_one("#settings-ytdlp", Static).update(
+                f"yt-dlp: [cyan]{get_installed_ytdlp_version()}[/]"
+            )
+        else:
+            self.query_one("#settings-ytdlp", Static).update("yt-dlp: (unavailable)")
+        self.query_one("#settings-ffmpeg-status", Static).update(_ffmpeg_status_markup(self._cfg))
+        try:
+            self.query_one("#settings-ffmpeg-hint", Static).update(_ffmpeg_settings_hint_markup())
+            self.query_one("#settings-ffmpeg-input", Input).value = str(
+                self._cfg.get("ffmpeg_location") or ""
+            )
+        except Exception:
+            pass
+        raw = (self._player or "").strip()
+        disp = raw if raw else "system default"
+        resolved = self._resolve_player_executable()
+        if resolved:
+            pline = f"Player: [bold #3fb950]{escape(disp)}[/] → [dim]{escape(resolved)}[/]"
+        else:
+            pline = (
+                f"Player: [bold #3fb950]{escape(disp)}[/] → [dim]"
+                "OS default (start / xdg-open / open)[/]"
+            )
+        self.query_one("#settings-player", Static).update(pline)
         try:
             self.query_one("#settings-player-input", Input).value = self._player
         except Exception:
             pass
-        if get_installed_ytdlp_version:
-            self.query_one("#settings-ytdlp", Static).update(
-                f"Installed: [cyan]{get_installed_ytdlp_version()}[/]"
-            )
-        else:
-            self.query_one("#settings-ytdlp", Static).update("yt-dlp version: (unavailable)")
         cw = _get_cast_discover_wait(self._cfg)
         try:
             inp = self.query_one("#settings-cast-wait", Input)
@@ -1413,6 +1692,20 @@ class DLPulseTextualApp(App[None]):
             self.call_from_thread(self._apply_dl_progress, d)
 
         spec, extra = preset
+        extra_dl = dict(extra)
+        ff_loc = _resolve_ffmpeg_for_ytdlp(self._cfg)
+        if ff_loc:
+            extra_dl["ffmpeg_location"] = ff_loc
+        needs_ffmpeg = "+" in spec or any(
+            isinstance(x, dict) and str(x.get("key", "")).startswith("FFmpeg")
+            for x in (extra_dl.get("postprocessors") or [])
+        )
+        if needs_ffmpeg and not ff_loc:
+            self.call_from_thread(
+                self.notify,
+                "FFmpeg not found — needed for this format. Install FFmpeg or set its path in Settings (F6).",
+            )
+            self.call_from_thread(self._log, log_id, _ffmpeg_missing_download_tip_log())
         self.call_from_thread(self._show_dl_progress_wrap)
         self.call_from_thread(
             self._log_queue,
@@ -1428,7 +1721,7 @@ class DLPulseTextualApp(App[None]):
                 {"message": f"Starting…  |  {escape(u[:100])}", "fraction": None, "title": "", "filename": ""},
             )
             ok, files, err = run_download(
-                u, spec, extra, str(out), no_playlist=no_pl, progress_callback=on_prog
+                u, spec, extra_dl, str(out), no_playlist=no_pl, progress_callback=on_prog
             )
             if ok:
                 self.call_from_thread(self._log, log_id, f"[green]OK:[/] {', '.join(files)}")
@@ -1437,10 +1730,13 @@ class DLPulseTextualApp(App[None]):
                     f"[#3fb950]✓[/] [#8b949e]{queue_label[:40]}[/] — [#6e7681]{', '.join(files)[:50]}[/]",
                 )
             else:
-                self.call_from_thread(self._log, log_id, f"[red]{err or '?'}[/]")
+                err_s = err or "?"
+                if "ffmpeg" in err_s.lower():
+                    err_s += _ffmpeg_missing_err_suffix()
+                self.call_from_thread(self._log, log_id, f"[red]{err_s}[/]")
                 self.call_from_thread(
                     self._log_queue,
-                    f"[#f85149]✗[/] [#8b949e]{queue_label[:40]}[/] [#6e7681]— {err or 'failed'}[/]",
+                    f"[#f85149]✗[/] [#8b949e]{queue_label[:40]}[/] [#6e7681]— {err_s[:120]}[/]",
                 )
         self.call_from_thread(self._refresh_library_table)
         self.call_from_thread(self._reset_dl_progress_ui)
@@ -1566,12 +1862,17 @@ class DLPulseTextualApp(App[None]):
             self.notify("No URLs to play.")
             return
         player = self._resolve_player_executable()
-        if not player:
-            self.notify("Set a player in Settings or install mpv / vlc (PATH).")
+        if player is None:
+            try:
+                self._launch_urls_os_default(urls)
+                self.notify(f"Opened {len(urls)} URL(s) with the system default app.")
+                self._log("#dl-log", f"[#3fb950]▶[/] (system default) — {len(urls)} URL(s)")
+            except Exception as e:
+                self.notify(str(e))
             return
         try:
             self._launch_player_detached(player, urls)
-            self.notify(f"Playlist: {len(urls)} item(s) in {player}.")
+            self.notify(f"Playlist: {len(urls)} item(s) in {Path(player).name}.")
             self._log("#dl-log", f"[#3fb950]▶[/] {player} — {len(urls)} URL(s) in order")
             if Path(player).name.lower().startswith("mpv"):
                 self.notify(
@@ -1717,7 +2018,21 @@ class DLPulseTextualApp(App[None]):
         if not paths:
             self.notify("Select one or more files.")
             return
-        player = self._resolve_player_executable() or _DEFAULT_PLAYER
+        player = self._resolve_player_executable()
+        if player is None:
+            try:
+                self._launch_paths_os_default(paths)
+                names = ", ".join(p.name for p in paths[:3])
+                if len(paths) > 3:
+                    names += f" (+{len(paths)-3} more)"
+                self.notify(f"Opened with system default: {names}")
+                self._log(
+                    "#log-lib",
+                    f"[#3fb950]▶[/] (system default) {' '.join(str(p.name) for p in paths[:2])}",
+                )
+            except Exception as e:
+                self.notify(str(e))
+            return
         try:
             self._launch_player_detached(player, paths)
             names = ", ".join(p.name for p in paths[:3])
@@ -2010,31 +2325,116 @@ class DLPulseTextualApp(App[None]):
         self._refresh_library_table()
         self.notify("Reset to ~/Downloads")
 
+    def _save_ffmpeg_setting_from_input(self, *, notify: bool = True, do_refresh: bool = True) -> bool:
+        val = self.query_one("#settings-ffmpeg-input", Input).value.strip()
+        if not val:
+            self._cfg.pop("ffmpeg_location", None)
+            _save_config(self._cfg)
+            if do_refresh:
+                self._refresh_settings_static()
+            if notify:
+                self.notify("FFmpeg path cleared (use PATH auto-detect).")
+            return True
+        p = Path(val)
+        ok = False
+        if p.is_file() and p.name.lower() in ("ffmpeg", "ffmpeg.exe"):
+            ok = True
+        elif p.is_dir():
+            exe = p / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")
+            if exe.is_file():
+                ok = True
+        if not ok:
+            if notify:
+                self.notify("Invalid: choose the ffmpeg binary or a folder that contains it.")
+            return False
+        self._cfg["ffmpeg_location"] = val
+        _save_config(self._cfg)
+        if do_refresh:
+            self._refresh_settings_static()
+        if notify:
+            self.notify("FFmpeg location saved.")
+        return True
+
+    @on(Button.Pressed, "#btn-settings-save-ffmpeg")
+    def settings_save_ffmpeg(self) -> None:
+        self._save_ffmpeg_setting_from_input()
+
+    @on(Input.Submitted, "#settings-ffmpeg-input")
+    def settings_ffmpeg_input_submitted(self) -> None:
+        self._save_ffmpeg_setting_from_input()
+
+    @on(Button.Pressed, "#btn-settings-clear-ffmpeg")
+    def settings_clear_ffmpeg(self) -> None:
+        self._cfg.pop("ffmpeg_location", None)
+        _save_config(self._cfg)
+        try:
+            self.query_one("#settings-ffmpeg-input", Input).value = ""
+        except Exception:
+            pass
+        self._refresh_settings_static()
+        self.notify("FFmpeg override cleared.")
+
+    def _save_player_setting_from_input(self, *, notify: bool = True, do_refresh: bool = True) -> None:
+        val = self.query_one("#settings-player-input", Input).value.strip()
+        if val.lower() in ("auto", "default", "os", "system"):
+            val = ""
+        self._player = val
+        if val:
+            self._cfg["player"] = val
+        else:
+            self._cfg.pop("player", None)
+        _save_config(self._cfg)
+        if do_refresh:
+            self._refresh_settings_static()
+        if notify:
+            msg = "system default (URLs/files open with the OS handler)" if not val else val
+            self.notify(f"Player saved: {msg}")
+
     @on(Button.Pressed, "#btn-settings-save-player")
     def settings_save_player(self) -> None:
-        val = self.query_one("#settings-player-input", Input).value.strip()
-        if not val:
-            self.notify("Enter a player name.")
-            return
-        self._player = val
-        self._cfg["player"] = val
-        _save_config(self._cfg)
-        self._refresh_settings_static()
-        self.notify(f"Player saved: {val}")
+        self._save_player_setting_from_input()
 
-    @on(Button.Pressed, "#btn-settings-save-cast-wait")
-    def settings_save_cast_wait(self) -> None:
+    @on(Input.Submitted, "#settings-player-input")
+    def settings_player_input_submitted(self) -> None:
+        self._save_player_setting_from_input()
+
+    def _save_cast_wait_from_input(self, *, notify: bool = True, do_refresh: bool = True) -> bool:
         raw = self.query_one("#settings-cast-wait", Input).value.strip()
         try:
             v = float(raw) if raw else _get_cast_discover_wait(self._cfg)
         except ValueError:
-            self.notify("Enter a number (seconds).")
-            return
+            if notify:
+                self.notify("Enter a number (seconds).")
+            return False
         v = max(0.5, min(120.0, v))
         self._cfg["cast_discover_wait"] = v
         _save_config(self._cfg)
+        if do_refresh:
+            self._refresh_settings_static()
+        if notify:
+            self.notify(f"Chromecast discovery wait: {v}s")
+        return True
+
+    @on(Button.Pressed, "#btn-settings-save-cast-wait")
+    def settings_save_cast_wait(self) -> None:
+        self._save_cast_wait_from_input()
+
+    @on(Input.Submitted, "#settings-cast-wait")
+    def settings_cast_wait_submitted(self) -> None:
+        self._save_cast_wait_from_input()
+
+    @on(Button.Pressed, "#btn-settings-save-all")
+    def settings_save_all(self) -> None:
+        ok_ff = self._save_ffmpeg_setting_from_input(notify=False, do_refresh=False)
+        self._save_player_setting_from_input(notify=False, do_refresh=False)
+        ok_cast = self._save_cast_wait_from_input(notify=False, do_refresh=False)
         self._refresh_settings_static()
-        self.notify(f"Chromecast discovery wait: {v}s")
+        if ok_ff and ok_cast:
+            self.notify("All settings saved (FFmpeg, player, Cast wait).")
+        elif not ok_ff:
+            self.notify("Fix FFmpeg path (folder with ffmpeg or path to binary), or clear the field.")
+        else:
+            self.notify("Saved. Fix Chromecast wait (enter seconds).")
 
     @on(Button.Pressed, "#btn-settings-pypi")
     def settings_pypi(self) -> None:

@@ -1,6 +1,6 @@
 [project]
 name = "dlpulse-textual"
-version = "1.0.1"
+version = "1.0.2"
 description = "DLPulse Textual TUI — entry: dlpulse_textual.py (uses ../yt/flet_app yt_core & helpers)"
 requires-python = ">=3.11"
 dependencies = [

@@ -1,7 +1,7 @@
 # PyInstaller one-file bundles for Linux / Windows / macOS + wheel/sdist (Linux).
 # Checks out calvarr/DLPulse as ``yt/`` next to this repo (same as local path_setup.py).
 #
-# Push tag ``v*`` → release with binaries + .whl/.tar.gz.
+# Push tag ``v*`` → release with binaries + .whl/.tar.gz (Linux/macOS assets use ``.bin``).
 # Push ``main`` → prerelease ``continuous`` with latest artifacts.
 
 name: Build DLPulse-textual
@@ -182,17 +182,17 @@ jobs:
         run: |
           set -eux
           mkdir -p release-assets
-          # Native bundles (flat names for download clarity)
+          # Native bundles (.exe on Windows; .bin on Unix so releases show a clear extension)
           if [ -f artifacts/dlpulse-textual-linux/dlpulse-textual-tui ]; then
-            cp -f artifacts/dlpulse-textual-linux/dlpulse-textual-tui release-assets/DLPulse-textual-tui-linux-amd64
-            chmod +x release-assets/DLPulse-textual-tui-linux-amd64
+            cp -f artifacts/dlpulse-textual-linux/dlpulse-textual-tui release-assets/DLPulse-textual-tui-linux-amd64.bin
+            chmod +x release-assets/DLPulse-textual-tui-linux-amd64.bin
           fi
           if [ -f artifacts/dlpulse-textual-windows/dlpulse-textual-tui.exe ]; then
             cp -f artifacts/dlpulse-textual-windows/dlpulse-textual-tui.exe release-assets/DLPulse-textual-tui-windows-amd64.exe
           fi
           if [ -f artifacts/dlpulse-textual-macos/dlpulse-textual-tui ]; then
-            cp -f artifacts/dlpulse-textual-macos/dlpulse-textual-tui release-assets/DLPulse-textual-tui-macos
-            chmod +x release-assets/DLPulse-textual-tui-macos
+            cp -f artifacts/dlpulse-textual-macos/dlpulse-textual-tui release-assets/DLPulse-textual-tui-macos.bin
+            chmod +x release-assets/DLPulse-textual-tui-macos.bin
           fi
           # Wheel + sdist (from Linux job)
           shopt -s nullglob
@@ -232,12 +232,12 @@ jobs:
 
             | File | OS |
             |------|-----|
-            | `DLPulse-textual-tui-linux-amd64` | Linux x86_64, run in terminal |
+            | `DLPulse-textual-tui-linux-amd64.bin` | Linux x86_64 — `chmod +x` then `./DLPulse-textual-tui-linux-amd64.bin` |
             | `DLPulse-textual-tui-windows-amd64.exe` | Windows |
-            | `DLPulse-textual-tui-macos` | macOS (unsigned; may need right-click Open) |
-            | `*.whl` / `*.tar.gz` | `pip install` (still expects sibling ``yt`` for dev layout) |
+            | `DLPulse-textual-tui-macos.bin` | macOS (unsigned; Terminal or right-click → Open) |
+            | `*.whl` / `*.tar.gz` | `pip install` (dev layout still expects sibling ``yt``) |
 
-            Stable release: push a tag like `v1.0.1`.
+            Stable release: push a tag like `v1.0.2`.
           prerelease: true
           allowUpdates: true
           make_latest: false
