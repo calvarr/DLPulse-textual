@@ -729,11 +729,36 @@ class DLPulseTextualApp(App[None]):
         content-align: left middle;
     }
 
-    .settings-toolbar Static {
+    /* Save first so narrow terminals never clip the primary action */
+    #btn-settings-save-all,
+    #btn-settings-save-all-bottom {
+        min-width: 22;
+        margin-right: 1;
+    }
+
+    .settings-toolbar-hint {
         color: #484f58;
-        height: 1;
+        height: auto;
+        max-height: 2;
+        width: 1fr;
         content-align: left middle;
-        margin-right: 2;
+    }
+
+    /* Per-row: Save left, field grows — avoids hidden Save on small widths */
+    .settings-field-row {
+        height: auto;
+        layout: horizontal;
+        margin-bottom: 0;
+        margin-top: 1;
+    }
+
+    .settings-field-row Button {
+        margin-right: 1;
+    }
+
+    .settings-field-row Input {
+        width: 1fr;
+        min-width: 8;
     }
 
     #settings-scroll {
@@ -771,7 +796,11 @@ class DLPulseTextualApp(App[None]):
         padding: 0 1;
     }
 
-    #settings-cast-wait { width: 10; }
+    #settings-cast-wait {
+        width: 1fr;
+        max-width: 18;
+        min-width: 8;
+    }
 
     #settings-ffmpeg-input { min-width: 16; width: 1fr; }
 
@@ -1150,8 +1179,12 @@ class DLPulseTextualApp(App[None]):
             with TabPane("⚙ Settings  F6", id="tab-settings"):
                 yield Vertical(
                     Horizontal(
-                        Static("Save player, FFmpeg path, and Cast wait at once:", id="settings-toolbar-hint"),
                         Button("Save all settings", id="btn-settings-save-all", variant="primary"),
+                        Static(
+                            "Saves player, FFmpeg path & Cast wait (or use Save in each section).",
+                            id="settings-toolbar-hint",
+                            classes="settings-toolbar-hint",
+                        ),
                         classes="settings-toolbar",
                     ),
                     ScrollableContainer(
@@ -1172,13 +1205,13 @@ class DLPulseTextualApp(App[None]):
                                 Static("", id="settings-ffmpeg-status"),
                                 Static(_ffmpeg_settings_hint_markup(), id="settings-ffmpeg-hint"),
                                 Horizontal(
+                                    Button("Save", id="btn-settings-save-ffmpeg", variant="success"),
+                                    Button("Clear", id="btn-settings-clear-ffmpeg"),
                                     Input(
                                         placeholder=_ffmpeg_input_placeholder(),
                                         id="settings-ffmpeg-input",
                                     ),
-                                    Button("Save", id="btn-settings-save-ffmpeg", variant="success"),
-                                    Button("Clear", id="btn-settings-clear-ffmpeg"),
-                                    classes="row-gap",
+                                    classes="settings-field-row",
                                 ),
                                 Button("Check PyPI version", id="btn-settings-pypi"),
                                 classes="settings-card",
@@ -1191,12 +1224,12 @@ class DLPulseTextualApp(App[None]):
                                     id="settings-player-hint",
                                 ),
                                 Horizontal(
+                                    Button("Save", id="btn-settings-save-player", variant="success"),
                                     Input(
                                         placeholder="empty · vlc · mpv · full path…",
                                         id="settings-player-input",
                                     ),
-                                    Button("Save", id="btn-settings-save-player", variant="success"),
-                                    classes="row-gap",
+                                    classes="settings-field-row",
                                 ),
                                 classes="settings-card",
                             ),
@@ -1207,11 +1240,15 @@ class DLPulseTextualApp(App[None]):
                                     id="settings-cast-wait-help",
                                 ),
                                 Horizontal(
-                                    Input(placeholder="3", id="settings-cast-wait"),
                                     Button("Save", id="btn-settings-save-cast-wait", variant="success"),
-                                    classes="row-gap",
+                                    Input(placeholder="3", id="settings-cast-wait"),
+                                    classes="settings-field-row",
                                 ),
                                 classes="settings-card",
+                            ),
+                            Horizontal(
+                                Button("Save all settings", id="btn-settings-save-all-bottom", variant="primary"),
+                                classes="settings-toolbar",
                             ),
                             RichLog(id="log-settings", markup=True),
                             id="settings-inner-scroll",
@@ -2423,6 +2460,7 @@ class DLPulseTextualApp(App[None]):
     def settings_cast_wait_submitted(self) -> None:
         self._save_cast_wait_from_input()
 
+    @on(Button.Pressed, "#btn-settings-save-all-bottom")
     @on(Button.Pressed, "#btn-settings-save-all")
     def settings_save_all(self) -> None:
         ok_ff = self._save_ffmpeg_setting_from_input(notify=False, do_refresh=False)
