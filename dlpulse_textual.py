@@ -257,6 +257,61 @@ def _ffmpeg_missing_err_suffix() -> str:
     return " — Settings → FFmpeg, or install ffmpeg via your package manager"
 
 
+def _locate_ytdlp_binary() -> str | None:
+    """Find system yt-dlp / youtube-dl (mpv ytdl_hook needs it for YouTube/SoundCloud URLs)."""
+    w = shutil.which("yt-dlp") or shutil.which("youtube-dl")
+    if w:
+        return w
+    for d in ("/usr/local/bin", "/usr/bin", "/bin", str(Path.home() / ".local" / "bin")):
+        for name in ("yt-dlp", "youtube-dl"):
+            p = Path(d) / name
+            if p.is_file() and os.access(p, os.X_OK):
+                return str(p)
+    return None
+
+
+def _subprocess_env_for_external_gui() -> dict[str, str] | None:
+    """When frozen (PyInstaller), sanitize env for external GUI/CLI children.
+
+    - Strip ``_MEIPASS`` from ``LD_LIBRARY_PATH`` / ``PYTHONPATH`` (wrong libc for browser/mpv).
+    - Drop ``LD_PRELOAD`` / ``PYTHONHOME`` (bootloader hooks can break ``mpv``).
+    - Prepend standard ``PATH`` dirs so ``mpv`` finds ``yt-dlp`` for stream URLs.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    env = os.environ.copy()
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        me = os.path.normpath(str(meipass))
+        for key in ("LD_LIBRARY_PATH", "PYTHONPATH"):
+            val = env.get(key)
+            if not val:
+                continue
+            parts = [
+                p
+                for p in val.split(os.pathsep)
+                if p and os.path.normpath(p) != me and not os.path.normpath(p).startswith(me + os.sep)
+            ]
+            if parts:
+                env[key] = os.pathsep.join(parts)
+            else:
+                env.pop(key, None)
+    env.pop("PYTHONHOME", None)
+    env.pop("LD_PRELOAD", None)
+    if sys.platform != "win32":
+        cur = [p for p in (env.get("PATH") or "").split(os.pathsep) if p]
+        prepend: list[str] = []
+        for p in ("/usr/local/bin", "/usr/bin", "/bin", str(Path.home() / ".local" / "bin")):
+            if os.path.isdir(p) and p not in prepend:
+                prepend.append(p)
+        for p in reversed(prepend):
+            if p not in cur:
+                cur.insert(0, p)
+        if cur:
+            env["PATH"] = os.pathsep.join(cur)
+    return env
+
+
 class RenameScreen(Screen[tuple[str, str, str] | None]):
     """Rename a file in the library."""
 
@@ -1313,12 +1368,20 @@ class DLPulseTextualApp(App[None]):
         parts = [str(x) for x in targets]
         name = Path(player).name.lower()
         if name in ("mpv", "mpv.exe", "mpv.com"):
-            return [
-                player,
+            opts: list[str] = [
                 "--no-terminal",
                 "--input-terminal=no",
                 "--force-window=yes",
-            ] + parts
+            ]
+            # Frozen one-file: minimal PATH / hook discovery — point ytdl_hook at system yt-dlp.
+            if getattr(sys, "frozen", False) and sys.platform != "win32":
+                ytd = _locate_ytdlp_binary()
+                if ytd:
+                    opts.insert(
+                        0,
+                        "--script-opts=ytdl_hook-ytdl_path=" + ytd,
+                    )
+            return [player] + opts + parts
         return [player] + parts
 
     def _launch_player_detached(self, player: str, targets: Sequence[str | Path]) -> None:
@@ -1330,6 +1393,9 @@ class DLPulseTextualApp(App[None]):
             "stdin": subprocess.DEVNULL,
             "start_new_session": True,
         }
+        env = _subprocess_env_for_external_gui()
+        if env is not None:
+            kwargs["env"] = env
         if sys.platform == "win32":
             cr = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             # Do not hide GUI for players that need their own window (mpv/vlc).
@@ -1340,6 +1406,7 @@ class DLPulseTextualApp(App[None]):
 
     def _launch_urls_os_default(self, urls: Sequence[str]) -> None:
         """Open URLs with the OS-registered handler (browser, VLC URL scheme, …)."""
+        env = _subprocess_env_for_external_gui()
         for u in urls:
             s = (u or "").strip()
             if not s:
@@ -1354,24 +1421,37 @@ class DLPulseTextualApp(App[None]):
                     creationflags=cr,
                 )
             elif sys.platform == "darwin":
-                subprocess.Popen(
-                    ["open", s],
+                kwargs = dict(
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL,
                     start_new_session=True,
                 )
+                if env is not None:
+                    kwargs["env"] = env
+                subprocess.Popen(["open", s], **kwargs)
             else:
-                subprocess.Popen(
-                    ["xdg-open", s],
+                xdg = shutil.which("xdg-open")
+                gio = shutil.which("gio")
+                if xdg:
+                    argv = [xdg, s]
+                elif gio:
+                    argv = [gio, "open", s]
+                else:
+                    raise RuntimeError("xdg-open not found — install xdg-utils (or set a player in Settings).")
+                kwargs = dict(
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL,
                     start_new_session=True,
                 )
+                if env is not None:
+                    kwargs["env"] = env
+                subprocess.Popen(argv, **kwargs)
 
     def _launch_paths_os_default(self, paths: Sequence[Path | str]) -> None:
         """Open local files with the OS default application."""
+        env = _subprocess_env_for_external_gui()
         for raw in paths:
             p = Path(str(raw))
             if not p.is_file():
@@ -1380,21 +1460,33 @@ class DLPulseTextualApp(App[None]):
             if sys.platform == "win32":
                 os.startfile(ab)  # type: ignore[attr-defined]
             elif sys.platform == "darwin":
-                subprocess.Popen(
-                    ["open", ab],
+                kwargs = dict(
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL,
                     start_new_session=True,
                 )
+                if env is not None:
+                    kwargs["env"] = env
+                subprocess.Popen(["open", ab], **kwargs)
             else:
-                subprocess.Popen(
-                    ["xdg-open", ab],
+                xdg = shutil.which("xdg-open")
+                gio = shutil.which("gio")
+                if xdg:
+                    argv = [xdg, ab]
+                elif gio:
+                    argv = [gio, "open", ab]
+                else:
+                    raise RuntimeError("xdg-open not found — install xdg-utils (or set a player in Settings).")
+                kwargs = dict(
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     stdin=subprocess.DEVNULL,
                     start_new_session=True,
                 )
+                if env is not None:
+                    kwargs["env"] = env
+                subprocess.Popen(argv, **kwargs)
 
     def on_mount(self) -> None:
         rt = self.query_one("#results-table", DataTable)
@@ -1907,6 +1999,16 @@ class DLPulseTextualApp(App[None]):
             except Exception as e:
                 self.notify(str(e))
             return
+        if (
+            getattr(sys, "frozen", False)
+            and Path(player).name.lower().startswith("mpv")
+            and not _locate_ytdlp_binary()
+            and any("youtu" in u.lower() or "soundcloud" in u.lower() for u in urls)
+        ):
+            self.notify(
+                "Install system yt-dlp (e.g. pacman -S yt-dlp / apt install yt-dlp) — "
+                "mpv needs it to play YouTube/SoundCloud URLs from this bundle."
+            )
         try:
             self._launch_player_detached(player, urls)
             self.notify(f"Playlist: {len(urls)} item(s) in {Path(player).name}.")
