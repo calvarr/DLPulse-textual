@@ -6,5 +6,8 @@ venv/
 .eggs/
 dist/
 build/
+native-dist/
+pyi-work/
+python-dist/
 .mypy_cache/
 .pytest_cache/

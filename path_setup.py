@@ -14,8 +14,19 @@ def ensure_yt_flet_on_path() -> Path:
             flet_app/
           DLPulse_textual/  ← this package
 
-    Returns the ``flet_app`` directory path.
+    When frozen (e.g. PyInstaller one-file), dependencies are bundled; no sibling
+    ``yt`` folder is required — only ``sys._MEIPASS`` is prepended if present.
+
+    Returns the ``flet_app`` directory path (or a placeholder under frozen).
     """
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            mp = str(Path(meipass).resolve())
+            if mp not in sys.path:
+                sys.path.insert(0, mp)
+        return Path(__file__).resolve().parent
+
     here = Path(__file__).resolve().parent
     workspace = here.parent
     yt_repo = workspace / "yt" / "flet_app"

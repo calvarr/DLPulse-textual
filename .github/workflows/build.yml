@@ -1,0 +1,244 @@
+# PyInstaller one-file bundles for Linux / Windows / macOS + wheel/sdist (Linux).
+# Checks out calvarr/DLPulse as ``yt/`` next to this repo (same as local path_setup.py).
+#
+# Push tag ``v*`` → release with binaries + .whl/.tar.gz.
+# Push ``main`` → prerelease ``continuous`` with latest artifacts.
+
+name: Build DLPulse-textual
+
+on:
+  push:
+    branches: [main, master]
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: build-textual-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux
+            artifact_name: dlpulse-textual-linux
+          - os: windows-latest
+            target: windows
+            artifact_name: dlpulse-textual-windows
+          - os: macos-latest
+            target: macos
+            artifact_name: dlpulse-textual-macos
+
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.target }})
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout DLPulse-textual
+        uses: actions/checkout@v4
+        with:
+          path: DLPulse_textual
+
+      - name: Checkout DLPulse (yt_core, cast_http, …)
+        uses: actions/checkout@v4
+        with:
+          repository: calvarr/DLPulse
+          path: yt
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps + PyInstaller
+        shell: bash
+        run: |
+          set -e
+          python -m pip install --upgrade pip wheel setuptools
+          pip install pyinstaller
+          pip install -r DLPulse_textual/requirements.txt
+
+      - name: Python sdist/wheel (Linux only)
+        if: matrix.target == 'linux'
+        shell: bash
+        run: |
+          set -e
+          cd DLPulse_textual
+          python -m pip install build
+          python -m build
+          mkdir -p ../python-dist
+          shopt -s nullglob
+          cp -f dist/*.whl dist/*.tar.gz ../python-dist/
+
+      - name: PyInstaller (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          PYTHONPATH: ${{ github.workspace }}/yt/flet_app:${{ github.workspace }}/yt
+        run: |
+          set -e
+          cd DLPulse_textual
+          pyinstaller --noconfirm \
+            --distpath ../native-dist \
+            --workpath ../pyi-work \
+            --onefile \
+            --name dlpulse-textual-tui \
+            --paths "${{ github.workspace }}/yt/flet_app" \
+            --paths "${{ github.workspace }}/yt" \
+            --collect-all textual \
+            --collect-all rich \
+            --collect-all pychromecast \
+            --collect-all zeroconf \
+            --collect-all flask \
+            --collect-all werkzeug \
+            --collect-all yt_dlp \
+            --hidden-import=yt_core \
+            --hidden-import=cast_http \
+            --hidden-import=chromecast_helper \
+            --hidden-import=paths \
+            --hidden-import=path_setup \
+            --hidden-import=download_dir \
+            dlpulse_textual.py
+
+      - name: PyInstaller (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          PYTHONPATH: "${{ github.workspace }}/yt/flet_app;${{ github.workspace }}/yt"
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location DLPulse_textual
+          pyinstaller --noconfirm `
+            --distpath ../native-dist `
+            --workpath ../pyi-work `
+            --onefile `
+            --name dlpulse-textual-tui `
+            --paths "${{ github.workspace }}/yt/flet_app" `
+            --paths "${{ github.workspace }}/yt" `
+            --collect-all textual `
+            --collect-all rich `
+            --collect-all pychromecast `
+            --collect-all zeroconf `
+            --collect-all flask `
+            --collect-all werkzeug `
+            --collect-all yt_dlp `
+            --hidden-import=yt_core `
+            --hidden-import=cast_http `
+            --hidden-import=chromecast_helper `
+            --hidden-import=paths `
+            --hidden-import=path_setup `
+            --hidden-import=download_dir `
+            dlpulse_textual.py
+
+      - name: List native output
+        shell: bash
+        run: ls -la native-dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: native-dist/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload Python dist (Linux)
+        if: matrix.target == 'linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dlpulse-textual-python-dist
+          path: python-dist/
+          retention-days: 30
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: >-
+      success() &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+       github.ref == 'refs/heads/main' ||
+       github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: dlpulse-textual-*
+          merge-multiple: false
+
+      - name: Stage release files
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p release-assets
+          # Native bundles (flat names for download clarity)
+          if [ -f artifacts/dlpulse-textual-linux/dlpulse-textual-tui ]; then
+            cp -f artifacts/dlpulse-textual-linux/dlpulse-textual-tui release-assets/DLPulse-textual-tui-linux-amd64
+            chmod +x release-assets/DLPulse-textual-tui-linux-amd64
+          fi
+          if [ -f artifacts/dlpulse-textual-windows/dlpulse-textual-tui.exe ]; then
+            cp -f artifacts/dlpulse-textual-windows/dlpulse-textual-tui.exe release-assets/DLPulse-textual-tui-windows-amd64.exe
+          fi
+          if [ -f artifacts/dlpulse-textual-macos/dlpulse-textual-tui ]; then
+            cp -f artifacts/dlpulse-textual-macos/dlpulse-textual-tui release-assets/DLPulse-textual-tui-macos
+            chmod +x release-assets/DLPulse-textual-tui-macos
+          fi
+          # Wheel + sdist (from Linux job)
+          shopt -s nullglob
+          for f in artifacts/dlpulse-textual-python-dist/*; do
+            cp -f "$f" release-assets/
+          done
+          ls -la release-assets/
+
+      - name: Verify release assets
+        run: test "$(find release-assets -type f | wc -l)" -ge 1
+
+      - name: Move continuous tag (main/master only)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -fa continuous -m "Continuous build" "${GITHUB_SHA}"
+          git push origin refs/tags/continuous --force
+
+      - name: GitHub Release (version tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: DLPulse-textual ${{ github.ref_name }}
+          files: release-assets/*
+          generate_release_notes: true
+
+      - name: GitHub Release (continuous)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: continuous
+          name: DLPulse-textual (continuous)
+          body: |
+            Automated PyInstaller + wheel build from `${{ github.sha }}`.
+
+            | File | OS |
+            |------|-----|
+            | `DLPulse-textual-tui-linux-amd64` | Linux x86_64, run in terminal |
+            | `DLPulse-textual-tui-windows-amd64.exe` | Windows |
+            | `DLPulse-textual-tui-macos` | macOS (unsigned; may need right-click Open) |
+            | `*.whl` / `*.tar.gz` | `pip install` (still expects sibling ``yt`` for dev layout) |
+
+            Stable release: push a tag like `v1.0.1`.
+          prerelease: true
+          allowUpdates: true
+          make_latest: false
+          files: release-assets/*
