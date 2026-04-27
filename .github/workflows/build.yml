@@ -237,7 +237,7 @@ jobs:
             | `DLPulse-textual-tui-macos.bin` | macOS (unsigned; Terminal or right-click → Open) |
             | `*.whl` / `*.tar.gz` | `pip install` (dev layout still expects sibling ``yt``) |
 
-            Stable release: push a tag like `v1.0.3`.
+            Stable release: push a tag like `v1.0.4`.
           prerelease: true
           allowUpdates: true
           make_latest: false
