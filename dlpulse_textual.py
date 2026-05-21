@@ -1123,7 +1123,7 @@ class DLPulseTextualApp(App[None]):
                         "  [bold #79c0ff]╚═════╝ ╚══════╝╚═╝      ╚═════╝ ╚══════╝╚══════╝╚══════╝[/]\n"
                         "  [#484f58]YouTube, SoundCloud & more — yt-dlp + Chromecast[/]\n\n"
                         "  [#21262d]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/]\n\n"
-                        "  [#388bfd]⬇[/]  [bold #c9d1d9]Search&Download[/]   [#484f58]YouTube or SoundCloud search · paste URL / playlist[/]\n"
+                        "  [#388bfd]⬇[/]  [bold #c9d1d9]Search&Download[/]   [#484f58]Study / library · yt-dlp URL or keyword · playlist[/]\n"
                         "  [#388bfd]▤[/]  [bold #c9d1d9]Library[/]            [#484f58]Browse, play, cast, rename, delete[/]\n"
                         "  [#388bfd]⊹[/]  [bold #c9d1d9]Cast[/]               [#484f58]HTTP server + Chromecast discovery[/]\n"
                         "  [#388bfd]⚙[/]  [bold #c9d1d9]Settings[/]           [#484f58]Downloads folder · media player[/]\n\n"
@@ -1304,6 +1304,22 @@ class DLPulseTextualApp(App[None]):
                             Horizontal(
                                 Button("Save all settings", id="btn-settings-save-all-bottom", variant="primary"),
                                 classes="settings-toolbar",
+                            ),
+                            Vertical(
+                                Label("  ⚖  LEGAL NOTICE", classes="section-label"),
+                                Static(
+                                    "[bold]Legal notice[/]\n\n"
+                                    "DLPulse is open-source software for educational purposes, technical research, "
+                                    "and personal media library management.\n\n"
+                                    "[bold]1. Nature[/] — Wrapper around yt-dlp/ffmpeg; no hosted copyrighted media; "
+                                    "public sources only; you are responsible for use.\n\n"
+                                    "[bold]2. Your responsibility[/] — Copyright & ToS compliance; personal offline "
+                                    "use only; no warranties; author not liable for third-party penalties.\n\n"
+                                    "[bold]3. No affiliation[/] — Not affiliated with YouTube, SoundCloud, Google LLC.\n\n"
+                                    "[#888]If you disagree, do not use or distribute this software.[/]",
+                                    id="settings-legal",
+                                ),
+                                classes="settings-card",
                             ),
                             RichLog(id="log-settings", markup=True),
                             id="settings-inner-scroll",
