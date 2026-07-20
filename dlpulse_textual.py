@@ -1624,7 +1624,7 @@ class DLPulseTextualApp(App[None]):
                     info = f"{m}:{s:02d}  {info}"
             else:
                 info = item.get("url", "")[-40:]
-            table.add_row(" ", title[:72], info[:36])
+            table.add_row(" ", title, info[:36])
         self._sync_results_table_visibility()
 
     def _sync_results_table_visibility(self) -> None:
@@ -1908,9 +1908,9 @@ class DLPulseTextualApp(App[None]):
         )
         self._log("#dl-log", f"[#d29922]Search {site}:[/] {q}")
         hits = (
-            search_soundcloud(q, max_results=15)
+            search_soundcloud(q, max_results=40)
             if src == "sc"
-            else search_youtube(q, max_results=15)
+            else search_youtube(q, max_results=40)
         )
         self._populate_results_table(hits, "search")
         self.query_one("#input-status", Static).update(
